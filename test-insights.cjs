@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const M=require('./model.js');
+let checks=0;function test(name,fn){fn();checks++;console.log('PASS '+name);}
+function experiment(schedule,ticks){const s=M.initial(),c=M.defaults(),pairs=M.createComparisons();for(let i=0;i<ticks;i++){schedule(c,i);M.step(s,c);M.stepComparisons(pairs,c);}return {s,c,pairs,rows:M.compareHallmarks(s,c,pairs)};}
+test('All disabled: no invented contributions',()=>{const r=experiment(c=>Object.keys(c.h).forEach(k=>c.h[k]=false),400);for(const row of r.rows){assert.equal(row.used,false);assert.equal(row.populationDelta,0)}});
+test('Growth effect matches independently run no-growth control',()=>{const r=experiment(()=>{},800),control=M.initial(),c=M.defaults();c.h.growth=false;for(let i=0;i<800;i++)M.step(control,c);const delta=M.metrics(r.s,r.c).n-M.metrics(control,c).n;assert.equal(r.rows.find(x=>x.id==='growth').populationDelta,delta);assert(delta>0)});
+test('Unselected hallmark never acquires a contribution',()=>{const r=experiment(()=>{},600);assert.equal(r.rows.find(x=>x.id==='death').populationDelta,0)});
+test('Matched therapy can reverse growth hallmark benefit',()=>{const r=experiment(c=>c.tx[1]=1,200);assert(r.rows.find(x=>x.id==='growth').populationDelta<0)});
+test('Invasion shows spread without fabricated population gain',()=>{const r=experiment(c=>c.h.invasion=true,800),row=r.rows.find(x=>x.id==='invasion');assert.equal(row.populationDelta,0);assert(row.invasionPoints>0)});
+test('Counterfactual retains intervention timing and past effects',()=>{const r=experiment((c,i)=>{c.h.vessels=i>=100&&i<300;c.tx[0]=i>=400?.5:0},600);const c=M.defaults(),control=M.initial();for(let i=0;i<600;i++){c.tx[0]=i>=400?.5:0;M.step(control,c)}assert.deepEqual(r.pairs.vessels.state,control);const row=r.rows.find(x=>x.id==='vessels');assert(row.used);assert(!row.active);assert.notEqual(row.populationDelta,0)});
+test('Reset comparisons are independent and pristine',()=>{const a=M.createComparisons(),b=M.createComparisons();M.stepComparisons(a,M.defaults());assert.equal(b.growth.state.t,0);assert.equal(b.growth.used,false);assert.notEqual(a.death.state,a.growth.state)});
+test('Tiny comparator populations do not yield unstable percentages',()=>{const s=M.initial(),p=M.createComparisons();p.growth.state.pop.fill(0);const r=M.compareHallmarks(s,M.defaults(),p)[0];assert.equal(r.populationPct,null);assert.equal(r.populationDelta,120)});
+test('Stage context does not promote high burden or resistance to stage IV',()=>{const s=M.initial(),c=M.defaults();s.pop.fill(10000);Object.keys(c.h).forEach(k=>c.h[k]=true);assert.equal(M.stageContext(s,c).kind,'localized');s.invasion=.95;const r=M.stageContext(s,c);assert.equal(r.kind,'invasion');assert(r.text.includes('does not by itself mean stage III or IV'))});
+console.log(checks+' insight checks passed');
